@@ -45,12 +45,12 @@ The output is a single `HIDFader.exe` in `bin\Release\`.
 
 ### Application selector
 Double click the application from the list, click `Configure` or use keyboard and hit enter to open Binding editor
-<img width="586" height="493" alt="image" src="https://github.com/user-attachments/assets/e7f634b3-7a5f-4aab-8b92-b9c9000aa944" />
+<img width="586" height="493" alt="image" src="/hidfader-appselector.png" />
 
 ### Binding editor
 Click on the input or modifier to start listening for a bind. Click checkmark icon to confirm or X to clear  
 Use  `Apply & Save` to save the changes or `Reset All` to clear all bindings
-<img width="632" height="577" alt="image" src="https://github.com/user-attachments/assets/dab1be2a-2af2-4c5a-abe4-f488e68c2503" />
+<img width="632" height="577" alt="image" src="/hidfader-bindingeditor.png" />
 
 Configuration and logs are stored in:
 
