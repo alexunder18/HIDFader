@@ -2,7 +2,10 @@
 
 A Windows volume mixer that maps **HID controllers** to **per-application volume control**. 
 Turn any knob, slider, hat or button on your gaming device into a volume fader for your favorite game or application.
-That way you can control volume of your game, voice chat app, music player..
+That way you can control volume of your game, voice chat app, music player...
+
+![Downloads](https://img.shields.io/github/downloads/alexunder18/HIDFader/total)
+![License](https://img.shields.io/github/license/alexunder18/HIDFader)
 
 ## ✨ Features
 
