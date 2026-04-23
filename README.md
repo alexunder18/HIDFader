@@ -5,7 +5,7 @@ Turn any knob, slider, hat or button on your gaming device into a volume fader f
 That way you can control volume of your game, voice chat app, music player...
 
 ![Downloads](https://img.shields.io/github/downloads/alexunder18/HIDFader/total)
-![License](https://img.shields.io/github/license/alexunder18/HIDFader)
+![License](https://img.shields.io/github/license/alexunder18/HIDFader?branch=develop&cacheSeconds=0)
 
 ## ✨ Features
 
