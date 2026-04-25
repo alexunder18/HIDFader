@@ -4,6 +4,7 @@ using SharpDX.DirectInput;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 using HIDFader.Core;
 using CoreAudioSessionManager = HIDFader.Core.AudioSessionManager;
@@ -30,6 +31,7 @@ namespace HIDFader.Input
         private Dictionary<Guid, string> deviceFriendlyNames = new Dictionary<Guid, string>();
         private Dictionary<Guid, Guid> deviceProductGuids = new Dictionary<Guid, Guid>();
         private Dictionary<string, float> lastAxisVolumeByBinding = new Dictionary<string, float>();
+        private Dictionary<string, bool> axisKeyboardArmedByBinding = new Dictionary<string, bool>();
         private Dictionary<string, float> preMuteVolumeByProcess = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private DirectInput directInput;
         private Timer repeatTimer;
@@ -465,12 +467,13 @@ namespace HIDFader.Input
                                 HasExecutedInitial = false
                             };
 
-                            if (repeatTimer != null)
+                            // Keyboard emit fires once on press; only volume actions use hold-to-repeat.
+                            if (repeatTimer != null && !IsKeyboardEmit(binding))
                             {
                                 repeatTimer.Change(RepeatIntervalMs, RepeatIntervalMs);
                             }
 
-                            ExecuteVolumeAction(binding.Action, config);
+                            DispatchBindingAction(binding, config);
                         }
                     }
                 }
@@ -558,12 +561,13 @@ namespace HIDFader.Input
                                 HasExecutedInitial = false
                             };
 
-                            if (repeatTimer != null)
+                            // Keyboard emit fires once on press; only volume actions use hold-to-repeat.
+                            if (repeatTimer != null && !IsKeyboardEmit(binding))
                             {
                                 repeatTimer.Change(RepeatIntervalMs, RepeatIntervalMs);
                             }
 
-                            ExecuteVolumeAction(binding.Action, config);
+                            DispatchBindingAction(binding, config);
                         }
                     }
                 }
@@ -649,6 +653,38 @@ namespace HIDFader.Input
                         normalized = 1f - normalized;
                     }
 
+                    if (IsKeyboardEmit(binding))
+                    {
+                        // Edge-triggered: fire once when the axis crosses into the "high"
+                        // zone, re-arm after it returns to the "low" zone. Hysteresis
+                        // prevents chatter around the threshold.
+                        const float HighThreshold = 0.55f;
+                        const float LowThreshold = 0.45f;
+
+                        if (!axisKeyboardArmedByBinding.ContainsKey(binding.BindingId))
+                        {
+                            // First observation: only arm if the axis is currently below
+                            // the low threshold so we don't fire immediately on startup
+                            // when a throttle is already forward.
+                            axisKeyboardArmedByBinding[binding.BindingId] = normalized <= LowThreshold;
+                            continue;
+                        }
+
+                        bool armed = axisKeyboardArmedByBinding[binding.BindingId];
+
+                        if (armed && normalized >= HighThreshold)
+                        {
+                            axisKeyboardArmedByBinding[binding.BindingId] = false;
+                            EmitKeyboardKeys(binding, config);
+                        }
+                        else if (!armed && normalized <= LowThreshold)
+                        {
+                            axisKeyboardArmedByBinding[binding.BindingId] = true;
+                        }
+
+                        continue;
+                    }
+
                     if (lastAxisVolumeByBinding.TryGetValue(binding.BindingId, out float last) && Math.Abs(last - normalized) < AxisVolumeTriggerSensitivity)
                     {
                         continue; // axis is essentially unchanged — skip the write
@@ -657,6 +693,92 @@ namespace HIDFader.Input
                     lastAxisVolumeByBinding[binding.BindingId] = normalized;
                     SetVolumeDirect(normalized, config);
                 }
+            }
+        }
+
+        private static bool IsKeyboardEmit(InputBinding binding)
+        {
+            return string.Equals(binding.Action, "KeyboardEmit", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void DispatchBindingAction(InputBinding binding, ApplicationConfig config)
+        {
+            if (IsKeyboardEmit(binding))
+            {
+                EmitKeyboardKeys(binding, config);
+            }
+            else
+            {
+                ExecuteVolumeAction(binding.Action, config);
+            }
+        }
+
+        private void EmitKeyboardKeys(InputBinding binding, ApplicationConfig config)
+        {
+            if (binding.OutputKeys == null || binding.OutputKeys.Count == 0)
+            {
+                return;
+            }
+
+            // Keystrokes go to the foreground window, so a per-app binding is only
+            // meaningful when that app IS the foreground window. This lets the same
+            // physical button send different keys depending on which app is focused.
+            var foregroundProcess = GetForegroundProcessName();
+            if (!string.Equals(foregroundProcess, config.ProcessName, StringComparison.OrdinalIgnoreCase))
+            {
+                log.Debug($"Keyboard emit skipped: foreground is '{foregroundProcess}', binding targets '{config.ProcessName}'");
+                return;
+            }
+
+            // Snapshot so the joystick thread can't mutate the list mid-emit.
+            var chords = new List<string>(binding.OutputKeys);
+
+            // Offload to the thread pool so inter-chord sleeps don't stall polling.
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    KeyboardEmitter.EmitSequence(chords);
+                    OnActionExecuted?.Invoke($"Keys: {string.Join(", ", chords)} ({config.DisplayName})");
+                }
+                catch (Exception ex)
+                {
+                    log.Error(ex, "Error emitting keyboard sequence for {0}", config.DisplayName);
+                }
+            });
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        /// <summary>
+        /// Returns Process.ProcessName (e.g. "discord", "DCS" — no .exe) of the window
+        /// that currently has focus, or null if it can't be resolved.
+        /// </summary>
+        private string GetForegroundProcessName()
+        {
+            try
+            {
+                var hwnd = GetForegroundWindow();
+                if (hwnd == IntPtr.Zero)
+                    return null;
+
+                GetWindowThreadProcessId(hwnd, out uint pid);
+                if (pid == 0)
+                    return null;
+
+                using (var process = Process.GetProcessById((int)pid))
+                {
+                    return process.ProcessName;
+                }
+            }
+            catch (Exception ex)
+            {
+                log.Debug($"Could not resolve foreground process: {ex.Message}");
+                return null;
             }
         }
 
@@ -979,9 +1101,11 @@ namespace HIDFader.Input
             try
             {
                 // Execute held joystick buttons. Mute is a toggle — don't repeat it while held.
+                // Keyboard emit fires once on press — also skipped here.
                 foreach (var kvp in heldJoystickButtons)
                 {
-                    if (string.Equals(kvp.Value.Action, "Mute", StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(kvp.Value.Action, "Mute", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(kvp.Value.Action, "KeyboardEmit", StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
                     }

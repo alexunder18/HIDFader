@@ -58,6 +58,14 @@ namespace HIDFader.Core
         public List<string> ModifierCodes { get; set; } = new List<string>();
 
         /// <summary>
+        /// For KeyboardEmit bindings: ordered sequence of keyboard chords
+        /// (e.g., "A", "Ctrl+C", "F1") to send when the HID input triggers.
+        /// Each chord is pressed and released in order.
+        /// </summary>
+        [XmlElement]
+        public List<string> OutputKeys { get; set; } = new List<string>();
+
+        /// <summary>
         /// User-friendly description of the binding
         /// </summary>
         [XmlAttribute]

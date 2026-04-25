@@ -80,6 +80,7 @@
     <Compile Include="Core\BindingConfiguration.cs" />
     <Compile Include="Core\InputBinding.cs" />
     <Compile Include="Input\HeldInputState.cs" />
+    <Compile Include="Input\KeyboardEmitter.cs" />
     <Compile Include="Input\VolumeControlListener.cs" />
     <Compile Include="Core\AudioSessionInfo.cs" />
     <Compile Include="Core\AudioSessionManager.cs" />
@@ -98,6 +99,10 @@
     </Compile>
     <Compile Include="UI\frmBindingEditor.Designer.cs">
       <DependentUpon>frmBindingEditor.cs</DependentUpon>
+    </Compile>
+    <Compile Include="UI\frmBindingEditor.Keyboard.cs">
+      <DependentUpon>frmBindingEditor.cs</DependentUpon>
+      <SubType>Form</SubType>
     </Compile>
   </ItemGroup>
   <ItemGroup>
