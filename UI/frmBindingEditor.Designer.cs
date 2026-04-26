@@ -1,4 +1,4 @@
-namespace HIDFader.UI
+namespace HIDMate.UI
 {
     partial class frmBindingEditor
     {
@@ -31,6 +31,7 @@ namespace HIDFader.UI
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(frmBindingEditor));
             this.tabControl = new System.Windows.Forms.TabControl();
             this.tabHID = new System.Windows.Forms.TabPage();
+            this.tabKeyboard = new System.Windows.Forms.TabPage();
             this.panelButtons = new System.Windows.Forms.Panel();
             this.btnApply = new System.Windows.Forms.Button();
             this.btnReset = new System.Windows.Forms.Button();
@@ -42,6 +43,7 @@ namespace HIDFader.UI
             // tabControl
             // 
             this.tabControl.Controls.Add(this.tabHID);
+            this.tabControl.Controls.Add(this.tabKeyboard);
             this.tabControl.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tabControl.Location = new System.Drawing.Point(5, 5);
             this.tabControl.Name = "tabControl";
@@ -57,8 +59,19 @@ namespace HIDFader.UI
             this.tabHID.Padding = new System.Windows.Forms.Padding(5);
             this.tabHID.Size = new System.Drawing.Size(612, 469);
             this.tabHID.TabIndex = 0;
-            this.tabHID.Text = "HID Configuration";
+            this.tabHID.Text = "Volume";
             this.tabHID.UseVisualStyleBackColor = true;
+            // 
+            // tabKeyboard
+            // 
+            this.tabKeyboard.AutoScroll = true;
+            this.tabKeyboard.Location = new System.Drawing.Point(4, 22);
+            this.tabKeyboard.Name = "tabKeyboard";
+            this.tabKeyboard.Padding = new System.Windows.Forms.Padding(5);
+            this.tabKeyboard.Size = new System.Drawing.Size(612, 469);
+            this.tabKeyboard.TabIndex = 1;
+            this.tabKeyboard.Text = "Keyboard";
+            this.tabKeyboard.UseVisualStyleBackColor = true;
             // 
             // panelButtons
             // 
@@ -126,6 +139,7 @@ namespace HIDFader.UI
 
         private System.Windows.Forms.TabControl tabControl;
         private System.Windows.Forms.TabPage tabHID;
+        private System.Windows.Forms.TabPage tabKeyboard;
         private System.Windows.Forms.Panel panelButtons;
         private System.Windows.Forms.Button btnApply;
         private System.Windows.Forms.Button btnReset;

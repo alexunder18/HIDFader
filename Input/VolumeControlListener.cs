@@ -4,11 +4,12 @@ using SharpDX.DirectInput;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
-using HIDFader.Core;
-using CoreAudioSessionManager = HIDFader.Core.AudioSessionManager;
+using HIDMate.Core;
+using CoreAudioSessionManager = HIDMate.Core.AudioSessionManager;
 
-namespace HIDFader.Input
+namespace HIDMate.Input
 {
     public partial class VolumeControlListener : IDisposable
     {
@@ -30,6 +31,7 @@ namespace HIDFader.Input
         private Dictionary<Guid, string> deviceFriendlyNames = new Dictionary<Guid, string>();
         private Dictionary<Guid, Guid> deviceProductGuids = new Dictionary<Guid, Guid>();
         private Dictionary<string, float> lastAxisVolumeByBinding = new Dictionary<string, float>();
+        private Dictionary<string, bool> axisKeyboardArmedByBinding = new Dictionary<string, bool>();
         private Dictionary<string, float> preMuteVolumeByProcess = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         private DirectInput directInput;
         private Timer repeatTimer;
@@ -395,6 +397,24 @@ namespace HIDFader.Input
                     RemoveJoystick(guid, "poll failed");
                 }
             }
+
+            // Drive held mouse movement off the poll cadence so cursor speed is
+            // roughly independent of how many devices are attached.
+            ProcessHeldMouseMovements();
+        }
+
+        private static bool ButtonCodeMatches(InputBinding binding, int buttonIndex)
+        {
+            foreach (var code in binding.InputCodes)
+            {
+                if (code == buttonIndex.ToString())
+                    return true;
+                if (code.EndsWith($"Button_{buttonIndex}"))
+                    return true;
+                if (code.EndsWith($"_{buttonIndex}"))
+                    return true;
+            }
+            return false;
         }
 
         private void ProcessJoystickButtonPress(int buttonIndex, string deviceName, Guid deviceInstanceGuid, List<ApplicationConfig> configurations)
@@ -404,6 +424,8 @@ namespace HIDFader.Input
                 ? pg.ToString()
                 : null;
 
+            // Per-app pass: volume + keyboard emit. Mouse actions live in the
+            // global MouseBindings list now and are handled in the second pass.
             foreach (var config in configurations)
             {
                 if (!config.Enabled)
@@ -418,62 +440,98 @@ namespace HIDFader.Input
                         continue;
                     }
 
+                    if (IsMouseAction(binding.Action))
+                    {
+                        continue;
+                    }
+
                     if (!BindingMatchesDevice(binding, currentProductGuid, deviceName))
                     {
                         continue;
                     }
 
-                    var buttonMatches = false;
-                    foreach (var code in binding.InputCodes)
+                    if (!ButtonCodeMatches(binding, buttonIndex))
                     {
-                        // Check direct index match
-                        if (code == buttonIndex.ToString())
-                        {
-                            buttonMatches = true;
-                            break;
-                        }
-
-                        // Check device-prefixed match (e.g., "USB_Gamepad_Button_0")
-                        if (code.EndsWith($"Button_{buttonIndex}"))
-                        {
-                            buttonMatches = true;
-                            break;
-                        }
-
-                        // Check suffix match
-                        if (code.EndsWith($"_{buttonIndex}"))
-                        {
-                            buttonMatches = true;
-                            break;
-                        }
+                        continue;
                     }
 
-                    if (buttonMatches)
+                    if (!AreModifiersPressed(binding.ModifierCodes))
                     {
-                        if (!AreModifiersPressed(binding.ModifierCodes))
+                        continue;
+                    }
+
+                    if (!heldJoystickButtons.ContainsKey(heldKey))
+                    {
+                        heldJoystickButtons[heldKey] = new HeldInputState
                         {
-                            continue;
+                            PressTime = Stopwatch.GetTimestamp(),
+                            Action = binding.Action,
+                            Config = config,
+                            HasExecutedInitial = false
+                        };
+
+                        // Keyboard emit fires once on press; only volume actions use hold-to-repeat.
+                        if (repeatTimer != null && !IsKeyboardEmit(binding))
+                        {
+                            repeatTimer.Change(RepeatIntervalMs, RepeatIntervalMs);
                         }
 
-                        if (!heldJoystickButtons.ContainsKey(heldKey))
-                        {
-                            heldJoystickButtons[heldKey] = new HeldInputState
-                            {
-                                PressTime = Stopwatch.GetTimestamp(),
-                                Action = binding.Action,
-                                Config = config,
-                                HasExecutedInitial = false
-                            };
-
-                            if (repeatTimer != null)
-                            {
-                                repeatTimer.Change(RepeatIntervalMs, RepeatIntervalMs);
-                            }
-
-                            ExecuteVolumeAction(binding.Action, config);
-                        }
+                        DispatchBindingAction(binding, config);
                     }
                 }
+            }
+
+            // Global mouse pass — runs even if a per-app binding already grabbed
+            // this button (heldJoystickButtons.ContainsKey will skip the duplicate
+            // hold registration). The cursor moves system-wide, so there's no
+            // ApplicationConfig context to attach.
+            int mouseSensitivity = ResolveMouseSensitivity();
+            foreach (var binding in bindingConfiguration.MouseBindings)
+            {
+                if (!binding.Enabled || binding.InputType != "HIDButton")
+                {
+                    continue;
+                }
+                if (!IsMouseAction(binding.Action))
+                {
+                    continue;
+                }
+                if (!BindingMatchesDevice(binding, currentProductGuid, deviceName))
+                {
+                    continue;
+                }
+                if (!ButtonCodeMatches(binding, buttonIndex))
+                {
+                    continue;
+                }
+                if (!AreModifiersPressed(binding.ModifierCodes))
+                {
+                    continue;
+                }
+
+                if (heldJoystickButtons.ContainsKey(heldKey))
+                {
+                    // A per-app binding already claimed this press for hold tracking.
+                    // Still fire the mouse action one-shot so users can layer.
+                    ExecuteMouseAction(binding.Action, mouseSensitivity, "Mouse");
+                    continue;
+                }
+
+                heldJoystickButtons[heldKey] = new HeldInputState
+                {
+                    PressTime = Stopwatch.GetTimestamp(),
+                    Action = binding.Action,
+                    Config = null,
+                    MouseSensitivity = mouseSensitivity,
+                    HasExecutedInitial = false,
+                };
+
+                if (repeatTimer != null)
+                {
+                    repeatTimer.Change(RepeatIntervalMs, RepeatIntervalMs);
+                }
+
+                ExecuteMouseAction(binding.Action, mouseSensitivity, "Mouse");
             }
         }
 
@@ -495,6 +553,18 @@ namespace HIDFader.Input
             }
         }
 
+        private static bool POVCodeMatches(InputBinding binding, string heldKey, string povCode)
+        {
+            foreach (var code in binding.InputCodes)
+            {
+                if (code.Equals(heldKey, StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (code.EndsWith(povCode, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
         private void ProcessPOVPress(string povCode, string deviceName, Guid deviceInstanceGuid, List<ApplicationConfig> configurations)
         {
             var heldKey = $"{deviceName}_{povCode}";
@@ -502,6 +572,7 @@ namespace HIDFader.Input
                 ? pg.ToString()
                 : null;
 
+            // Per-app pass.
             foreach (var config in configurations)
             {
                 if (!config.Enabled)
@@ -516,57 +587,94 @@ namespace HIDFader.Input
                         continue;
                     }
 
+                    if (IsMouseAction(binding.Action))
+                    {
+                        continue;
+                    }
+
                     if (!BindingMatchesDevice(binding, currentProductGuid, deviceName))
                     {
                         continue;
                     }
 
-                    var matches = false;
-                    foreach (var code in binding.InputCodes)
+                    if (!POVCodeMatches(binding, heldKey, povCode))
                     {
-                        // Match full code (e.g., "T_16000M_POV_North")
-                        if (code.Equals(heldKey, StringComparison.OrdinalIgnoreCase))
-                        {
-                            matches = true;
-                            break;
-                        }
-
-                        // Match suffix (e.g., "POV_North")
-                        if (code.EndsWith(povCode, StringComparison.OrdinalIgnoreCase))
-                        {
-                            matches = true;
-                            break;
-                        }
+                        continue;
                     }
 
-                    if (matches)
+                    if (!AreModifiersPressed(binding.ModifierCodes))
                     {
-                        if (!AreModifiersPressed(binding.ModifierCodes))
+                        continue;
+                    }
+
+                    log.Debug($"{heldKey} matched binding: {binding.Description}");
+
+                    if (!heldJoystickButtons.ContainsKey(heldKey))
+                    {
+                        heldJoystickButtons[heldKey] = new HeldInputState
                         {
-                            continue;
+                            PressTime = Stopwatch.GetTimestamp(),
+                            Action = binding.Action,
+                            Config = config,
+                            HasExecutedInitial = false
+                        };
+
+                        if (repeatTimer != null && !IsKeyboardEmit(binding))
+                        {
+                            repeatTimer.Change(RepeatIntervalMs, RepeatIntervalMs);
                         }
 
-                        log.Debug($"{heldKey} matched binding: {binding.Description}");
-
-                        if (!heldJoystickButtons.ContainsKey(heldKey))
-                        {
-                            heldJoystickButtons[heldKey] = new HeldInputState
-                            {
-                                PressTime = Stopwatch.GetTimestamp(),
-                                Action = binding.Action,
-                                Config = config,
-                                HasExecutedInitial = false
-                            };
-
-                            if (repeatTimer != null)
-                            {
-                                repeatTimer.Change(RepeatIntervalMs, RepeatIntervalMs);
-                            }
-
-                            ExecuteVolumeAction(binding.Action, config);
-                        }
+                        DispatchBindingAction(binding, config);
                     }
                 }
+            }
+
+            // Global mouse pass.
+            int mouseSensitivity = ResolveMouseSensitivity();
+            foreach (var binding in bindingConfiguration.MouseBindings)
+            {
+                if (!binding.Enabled || binding.InputType != "HIDButton")
+                {
+                    continue;
+                }
+                if (!IsMouseAction(binding.Action))
+                {
+                    continue;
+                }
+                if (!BindingMatchesDevice(binding, currentProductGuid, deviceName))
+                {
+                    continue;
+                }
+                if (!POVCodeMatches(binding, heldKey, povCode))
+                {
+                    continue;
+                }
+                if (!AreModifiersPressed(binding.ModifierCodes))
+                {
+                    continue;
+                }
+
+                if (heldJoystickButtons.ContainsKey(heldKey))
+                {
+                    ExecuteMouseAction(binding.Action, mouseSensitivity, "Mouse");
+                    continue;
+                }
+
+                heldJoystickButtons[heldKey] = new HeldInputState
+                {
+                    PressTime = Stopwatch.GetTimestamp(),
+                    Action = binding.Action,
+                    Config = null,
+                    MouseSensitivity = mouseSensitivity,
+                    HasExecutedInitial = false,
+                };
+
+                if (repeatTimer != null)
+                {
+                    repeatTimer.Change(RepeatIntervalMs, RepeatIntervalMs);
+                }
+
+                ExecuteMouseAction(binding.Action, mouseSensitivity, "Mouse");
             }
         }
 
@@ -649,6 +757,45 @@ namespace HIDFader.Input
                         normalized = 1f - normalized;
                     }
 
+                    if (IsMouseAction(binding.Action))
+                    {
+                        // Per-app pass no longer dispatches mouse — handled by
+                        // ProcessGlobalMouseAxisBindings against the global list.
+                        continue;
+                    }
+
+                    if (IsKeyboardEmit(binding))
+                    {
+                        // Edge-triggered: fire once when the axis crosses into the "high"
+                        // zone, re-arm after it returns to the "low" zone. Hysteresis
+                        // prevents chatter around the threshold.
+                        const float HighThreshold = 0.55f;
+                        const float LowThreshold = 0.45f;
+
+                        if (!axisKeyboardArmedByBinding.ContainsKey(binding.BindingId))
+                        {
+                            // First observation: only arm if the axis is currently below
+                            // the low threshold so we don't fire immediately on startup
+                            // when a throttle is already forward.
+                            axisKeyboardArmedByBinding[binding.BindingId] = normalized <= LowThreshold;
+                            continue;
+                        }
+
+                        bool armed = axisKeyboardArmedByBinding[binding.BindingId];
+
+                        if (armed && normalized >= HighThreshold)
+                        {
+                            axisKeyboardArmedByBinding[binding.BindingId] = false;
+                            EmitKeyboardKeys(binding, config);
+                        }
+                        else if (!armed && normalized <= LowThreshold)
+                        {
+                            axisKeyboardArmedByBinding[binding.BindingId] = true;
+                        }
+
+                        continue;
+                    }
+
                     if (lastAxisVolumeByBinding.TryGetValue(binding.BindingId, out float last) && Math.Abs(last - normalized) < AxisVolumeTriggerSensitivity)
                     {
                         continue; // axis is essentially unchanged — skip the write
@@ -657,6 +804,327 @@ namespace HIDFader.Input
                     lastAxisVolumeByBinding[binding.BindingId] = normalized;
                     SetVolumeDirect(normalized, config);
                 }
+            }
+
+            ProcessGlobalMouseAxisBindings(state, deviceName, currentProductGuid);
+        }
+
+        /// <summary>
+        /// Mirror of ProcessAxisBindings but for the global MouseBindings list.
+        /// MouseAxisX/Y do continuous center-rest movement; other Mouse*
+        /// actions on an axis are edge-triggered with hysteresis.
+        /// </summary>
+        private void ProcessGlobalMouseAxisBindings(JoystickState state, string deviceName, string currentProductGuid)
+        {
+            int sensitivity = ResolveMouseSensitivity();
+
+            foreach (var binding in bindingConfiguration.MouseBindings)
+            {
+                if (!binding.Enabled || binding.InputType != "HIDAxis")
+                {
+                    continue;
+                }
+                if (!IsMouseAction(binding.Action))
+                {
+                    continue;
+                }
+                if (!BindingMatchesDevice(binding, currentProductGuid, deviceName))
+                {
+                    continue;
+                }
+                if (binding.InputCodes == null || binding.InputCodes.Count == 0)
+                {
+                    continue;
+                }
+                if (!AreModifiersPressed(binding.ModifierCodes))
+                {
+                    continue;
+                }
+
+                var axisName = ExtractAxisName(binding.InputCodes[0]);
+                if (axisName == null)
+                {
+                    continue;
+                }
+                if (!TryReadAxisValue(state, axisName, out int raw))
+                {
+                    continue;
+                }
+
+                float normalized = Math.Max(0f, Math.Min(1f, raw / 65535f));
+                if (binding.Inverted)
+                {
+                    normalized = 1f - normalized;
+                }
+
+                if (IsMouseAxisMovementAction(binding.Action))
+                {
+                    const float Deadzone = 0.05f;
+                    float deflection = (normalized - 0.5f) * 2f; // -1..1
+
+                    if (Math.Abs(deflection) < Deadzone)
+                    {
+                        continue;
+                    }
+
+                    int pixels = (int)Math.Round(deflection * sensitivity * 2);
+                    if (pixels == 0)
+                    {
+                        continue;
+                    }
+
+                    if (binding.Action == "MouseAxisX")
+                    {
+                        MouseEmitter.Move(pixels, 0);
+                    }
+                    else
+                    {
+                        MouseEmitter.Move(0, pixels);
+                    }
+                }
+                else
+                {
+                    const float HighThreshold = 0.55f;
+                    const float LowThreshold = 0.45f;
+
+                    if (!axisKeyboardArmedByBinding.ContainsKey(binding.BindingId))
+                    {
+                        axisKeyboardArmedByBinding[binding.BindingId] = normalized <= LowThreshold;
+                        continue;
+                    }
+
+                    bool armed = axisKeyboardArmedByBinding[binding.BindingId];
+
+                    if (armed && normalized >= HighThreshold)
+                    {
+                        axisKeyboardArmedByBinding[binding.BindingId] = false;
+                        ExecuteMouseAction(binding.Action, sensitivity, "Mouse");
+                    }
+                    else if (!armed && normalized <= LowThreshold)
+                    {
+                        axisKeyboardArmedByBinding[binding.BindingId] = true;
+                    }
+                }
+            }
+        }
+
+        private static bool IsKeyboardEmit(InputBinding binding)
+        {
+            return string.Equals(binding.Action, "KeyboardEmit", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsMouseAction(string action)
+        {
+            return ApplicationConfig.IsMouseAction(action);
+        }
+
+        private static bool IsMouseMovementAction(string action)
+        {
+            return action == "MouseUp" || action == "MouseDown"
+                || action == "MouseLeft" || action == "MouseRight";
+        }
+
+        private static bool IsMouseClickAction(string action)
+        {
+            return action == "MouseLeftClick" || action == "MouseRightClick";
+        }
+
+        private static bool IsMouseAxisMovementAction(string action)
+        {
+            return action == "MouseAxisX" || action == "MouseAxisY";
+        }
+
+        /// <summary>
+        /// Reads the global mouse sensitivity, defaulting to 5 if the value on
+        /// disk was zero/missing. Cheap to call per tick — just two field reads.
+        /// </summary>
+        private int ResolveMouseSensitivity()
+        {
+            int s = bindingConfiguration.MouseSensitivity;
+            return s > 0 ? s : 5;
+        }
+
+        /// <summary>
+        /// Per-app dispatcher. Mouse actions used to land here too, but mouse is
+        /// now global and dispatched directly by the press/POV/axis handlers, so
+        /// this only sees volume + keyboard bindings.
+        /// </summary>
+        private void DispatchBindingAction(InputBinding binding, ApplicationConfig config)
+        {
+            if (IsKeyboardEmit(binding))
+            {
+                EmitKeyboardKeys(binding, config);
+            }
+            else
+            {
+                ExecuteVolumeAction(binding.Action, config);
+            }
+        }
+
+        /// <summary>
+        /// One-shot dispatch for mouse actions. Movement actions move the cursor
+        /// by sensitivity*2 pixels; clicks fire one button press/release; scroll
+        /// fires one notch. Held movement is driven by ProcessHeldMouseMovements
+        /// off the poll loop, not by the repeat timer.
+        /// </summary>
+        private void ExecuteMouseAction(string action, int sensitivity, string label)
+        {
+            try
+            {
+                int pixels = (sensitivity > 0 ? sensitivity : 5) * 2;
+                string source = string.IsNullOrEmpty(label) ? "Mouse" : label;
+
+                switch (action)
+                {
+                    case "MouseUp":
+                        MouseEmitter.Move(0, -pixels);
+                        OnActionExecuted?.Invoke($"Mouse up ({source})");
+                        break;
+                    case "MouseDown":
+                        MouseEmitter.Move(0, pixels);
+                        OnActionExecuted?.Invoke($"Mouse down ({source})");
+                        break;
+                    case "MouseLeft":
+                        MouseEmitter.Move(-pixels, 0);
+                        OnActionExecuted?.Invoke($"Mouse left ({source})");
+                        break;
+                    case "MouseRight":
+                        MouseEmitter.Move(pixels, 0);
+                        OnActionExecuted?.Invoke($"Mouse right ({source})");
+                        break;
+                    case "MouseLeftClick":
+                        MouseEmitter.LeftClick();
+                        OnActionExecuted?.Invoke($"Mouse left click ({source})");
+                        break;
+                    case "MouseRightClick":
+                        MouseEmitter.RightClick();
+                        OnActionExecuted?.Invoke($"Mouse right click ({source})");
+                        break;
+                    case "MouseScrollUp":
+                        MouseEmitter.Scroll(1);
+                        OnActionExecuted?.Invoke($"Scroll up ({source})");
+                        break;
+                    case "MouseScrollDown":
+                        MouseEmitter.Scroll(-1);
+                        OnActionExecuted?.Invoke($"Scroll down ({source})");
+                        break;
+                    default:
+                        log.Debug($"Unknown mouse action: {action}");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                log.Error(ex, "Error executing mouse action {0}", action);
+            }
+        }
+
+        /// <summary>
+        /// Emits relative cursor movement for every currently-held mouse-movement
+        /// button. Called at the end of each PollAllJoysticks tick (~10ms), giving
+        /// roughly 100Hz movement updates — smooth without flooding mouse_event.
+        /// Sensitivity comes from each held button's snapshot, so a slider change
+        /// mid-hold doesn't alter the speed of an already-pressed button.
+        /// </summary>
+        private void ProcessHeldMouseMovements()
+        {
+            if (heldJoystickButtons.Count == 0)
+                return;
+
+            int dx = 0, dy = 0;
+            bool any = false;
+
+            foreach (var kvp in heldJoystickButtons)
+            {
+                var action = kvp.Value.Action;
+                if (!IsMouseMovementAction(action))
+                    continue;
+
+                int sens = kvp.Value.MouseSensitivity > 0 ? kvp.Value.MouseSensitivity : 5;
+                int pixels = sens * 2;
+                any = true;
+
+                switch (action)
+                {
+                    case "MouseUp": dy -= pixels; break;
+                    case "MouseDown": dy += pixels; break;
+                    case "MouseLeft": dx -= pixels; break;
+                    case "MouseRight": dx += pixels; break;
+                }
+            }
+
+            if (any)
+            {
+                MouseEmitter.Move(dx, dy);
+            }
+        }
+
+        private void EmitKeyboardKeys(InputBinding binding, ApplicationConfig config)
+        {
+            if (binding.OutputKeys == null || binding.OutputKeys.Count == 0)
+            {
+                return;
+            }
+
+            // Keystrokes go to the foreground window, so a per-app binding is only
+            // meaningful when that app IS the foreground window. This lets the same
+            // physical button send different keys depending on which app is focused.
+            var foregroundProcess = GetForegroundProcessName();
+            if (!string.Equals(foregroundProcess, config.ProcessName, StringComparison.OrdinalIgnoreCase))
+            {
+                log.Debug($"Keyboard emit skipped: foreground is '{foregroundProcess}', binding targets '{config.ProcessName}'");
+                return;
+            }
+
+            // Snapshot so the joystick thread can't mutate the list mid-emit.
+            var chords = new List<string>(binding.OutputKeys);
+
+            // Offload to the thread pool so inter-chord sleeps don't stall polling.
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    KeyboardEmitter.EmitSequence(chords);
+                    OnActionExecuted?.Invoke($"Keys: {string.Join(", ", chords)} ({config.DisplayName})");
+                }
+                catch (Exception ex)
+                {
+                    log.Error(ex, "Error emitting keyboard sequence for {0}", config.DisplayName);
+                }
+            });
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        /// <summary>
+        /// Returns Process.ProcessName (e.g. "discord", "DCS" — no .exe) of the window
+        /// that currently has focus, or null if it can't be resolved.
+        /// </summary>
+        private string GetForegroundProcessName()
+        {
+            try
+            {
+                var hwnd = GetForegroundWindow();
+                if (hwnd == IntPtr.Zero)
+                    return null;
+
+                GetWindowThreadProcessId(hwnd, out uint pid);
+                if (pid == 0)
+                    return null;
+
+                using (var process = Process.GetProcessById((int)pid))
+                {
+                    return process.ProcessName;
+                }
+            }
+            catch (Exception ex)
+            {
+                log.Debug($"Could not resolve foreground process: {ex.Message}");
+                return null;
             }
         }
 
@@ -978,17 +1446,37 @@ namespace HIDFader.Input
         {
             try
             {
-                // Execute held joystick buttons. Mute is a toggle — don't repeat it while held.
+                // Execute held joystick buttons. The 100ms cadence is right for
+                // volume ticks and wheel notches; toggles fire once on press, and
+                // mouse movement runs off the 10ms poll loop.
                 foreach (var kvp in heldJoystickButtons)
                 {
-                    if (string.Equals(kvp.Value.Action, "Mute", StringComparison.OrdinalIgnoreCase))
+                    var action = kvp.Value.Action;
+
+                    if (string.Equals(action, "Mute", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(action, "KeyboardEmit", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (IsMouseMovementAction(action) || IsMouseClickAction(action))
                     {
                         continue;
                     }
 
                     try
                     {
-                        ExecuteVolumeAction(kvp.Value.Action, kvp.Value.Config);
+                        if (IsMouseAction(action))
+                        {
+                            // Only scroll lands here — movement and clicks were
+                            // filtered out above. Sensitivity was snapshotted
+                            // at press-time on the HeldInputState.
+                            ExecuteMouseAction(action, kvp.Value.MouseSensitivity, "Mouse");
+                        }
+                        else
+                        {
+                            ExecuteVolumeAction(action, kvp.Value.Config);
+                        }
                     }
                     catch (Exception ex)
                     {

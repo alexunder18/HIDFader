@@ -6,10 +6,10 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
-using HIDFader.Core;
-using HIDFader.Input;
+using HIDMate.Core;
+using HIDMate.Input;
 
-namespace HIDFader.UI
+namespace HIDMate.UI
 {
     public partial class frmBindingEditor : Form
     {
@@ -59,6 +59,7 @@ namespace HIDFader.UI
             this.Font = FormFont;
 
             SetupHIDTab(tabHID);
+            SetupKeyboardTab(tabKeyboard);
             btnApply.Click += BtnApply_Click;
             btnReset.Click += BtnReset_Click;
             btnCancel.Click += BtnCancel_Click;
@@ -207,6 +208,11 @@ namespace HIDFader.UI
 
         private void StartCapture(string actionName, string inputType, string captureMode)
         {
+            // An HID-tab capture always cancels any in-flight keyboard-tab capture so
+            // the display routing in UpdateCaptureDisplay() targets the correct labels.
+            CurrentKeyboardBindingId = null;
+            CurrentKeyboardCaptureField = null;
+
             CurrentCaptureMode = captureMode;
             CurrentCaptureAction = actionName;
             CurrentCaptureInputType = inputType;
@@ -398,12 +404,18 @@ namespace HIDFader.UI
         {
             foreach (var binding in ApplicationConfig.InputBindings)
             {
+                // Keyboard bindings live in their own tab with dynamic rows.
+                if (binding.Action == "KeyboardEmit")
+                    continue;
+
                 // Only populate valid, non-empty bindings
                 if (binding.InputCodes != null && binding.InputCodes.Count > 0)
                 {
                     UpdateBindingDisplay(binding);
                 }
             }
+
+            PopulateKeyboardTabFromConfig();
         }
 
         private void UpdateBindingDisplay(InputBinding binding)
@@ -869,11 +881,17 @@ namespace HIDFader.UI
 
         private void UpdateCaptureDisplay()
         {
+            if (CurrentKeyboardBindingId != null)
+            {
+                UpdateKeyboardCaptureDisplay();
+                return;
+            }
+
             if (CurrentCaptureMode == "Main")
             {
                 var mainLabelName = $"lblMainDisplay_{CurrentCaptureAction}_{CurrentCaptureInputType}";
                 var mainLabel = FindControlByName(mainLabelName) as Label;
-                
+
                 if (mainLabel != null && CapturedInputCodes.Count > 0)
                 {
                     mainLabel.Text = string.Join(" | ", CapturedInputCodes);
@@ -1087,6 +1105,9 @@ namespace HIDFader.UI
 
                 ApplicationConfig.InputBindings.Clear();
                 ResetAllBindingDisplays();
+
+                if (keyboardRowsPanel != null)
+                    keyboardRowsPanel.Controls.Clear();
             }
             catch (Exception ex)
             {
@@ -1263,6 +1284,7 @@ namespace HIDFader.UI
                     InputType = b.InputType,
                     InputCodes = new List<string>(b.InputCodes),
                     ModifierCodes = new List<string>(b.ModifierCodes),
+                    OutputKeys = new List<string>(b.OutputKeys ?? new List<string>()),
                     Description = b.Description,
                     Enabled = b.Enabled,
                     Inverted = b.Inverted,

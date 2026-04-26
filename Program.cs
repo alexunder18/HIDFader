@@ -1,10 +1,10 @@
 ﻿using NLog;
 using System;
 using System.Windows.Forms;
-using HIDFader.Core;
-using HIDFader.UI;
+using HIDMate.Core;
+using HIDMate.UI;
 
-namespace HIDFader
+namespace HIDMate
 {
     static class Program
     {

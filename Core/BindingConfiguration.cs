@@ -2,10 +2,27 @@ using NLog;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Xml.Serialization;
 
-namespace HIDFader.Core
+namespace HIDMate.Core
 {
+    /// <summary>
+    /// Top-level XML payload for the global mouse configuration. Mouse bindings
+    /// are NOT per-application (the cursor is global), so they live in their own
+    /// file rather than nested under each ApplicationConfig.
+    /// </summary>
+    [XmlRoot("MouseConfiguration")]
+    public class MouseConfigurationFile
+    {
+        [XmlAttribute]
+        public int Sensitivity { get; set; } = 5;
+
+        [XmlArray("Bindings")]
+        [XmlArrayItem("Binding")]
+        public List<InputBinding> Bindings { get; set; } = new List<InputBinding>();
+    }
+
     /// <summary>
     /// Manages all application configurations and their persistence
     /// This is the central manager for the configuration system
@@ -16,10 +33,23 @@ namespace HIDFader.Core
         private List<ApplicationConfig> ApplicationConfigs { get; set; } = new List<ApplicationConfig>();
         private string ConfigurationFilePath { get; set; }
         private string SettingsFilePath { get; set; }
+        private string MouseConfigurationFilePath { get; set; }
         private XmlSerializer ConfigSerializer { get; set; }
+        private XmlSerializer MouseSerializer { get; set; }
         private bool Disposed { get; set; }
 
         public int VolumeStepPercent { get; set; } = 1;
+
+        /// <summary>
+        /// Global mouse bindings. Cursor output is system-wide, so these are
+        /// stored once for the whole app rather than per ApplicationConfig.
+        /// </summary>
+        public List<InputBinding> MouseBindings { get; set; } = new List<InputBinding>();
+
+        /// <summary>
+        /// Speed multiplier for mouse-movement and scroll bindings (1–10).
+        /// </summary>
+        public int MouseSensitivity { get; set; } = 5;
 
         /// <summary>
         /// Event raised when configuration is loaded from disk
@@ -44,14 +74,19 @@ namespace HIDFader.Core
         public BindingConfiguration()
         {
             ConfigurationFilePath = GetDefaultConfigurationPath();
-            SettingsFilePath = Path.Combine(Path.GetDirectoryName(ConfigurationFilePath), "Settings.xml");
+            var dir = Path.GetDirectoryName(ConfigurationFilePath);
+            SettingsFilePath = Path.Combine(dir, "Settings.xml");
+            MouseConfigurationFilePath = Path.Combine(dir, "MouseBindings.xml");
             ConfigSerializer = new XmlSerializer(typeof(List<ApplicationConfig>), new XmlRootAttribute("ApplicationConfigurations"));
+            MouseSerializer = new XmlSerializer(typeof(MouseConfigurationFile));
         }
 
         public BindingConfiguration(string configPath) : this()
         {
             ConfigurationFilePath = configPath;
-            SettingsFilePath = Path.Combine(Path.GetDirectoryName(configPath), "Settings.xml");
+            var dir = Path.GetDirectoryName(configPath);
+            SettingsFilePath = Path.Combine(dir, "Settings.xml");
+            MouseConfigurationFilePath = Path.Combine(dir, "MouseBindings.xml");
         }
 
         /// <summary>
@@ -60,7 +95,7 @@ namespace HIDFader.Core
         private static string GetDefaultConfigurationPath()
         {
             var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var appConfigDir = Path.Combine(appDataPath, "HIDFader");
+            var appConfigDir = Path.Combine(appDataPath, "HIDMate");
 
             if (!Directory.Exists(appConfigDir))
             {
@@ -113,6 +148,113 @@ namespace HIDFader.Core
             }
 
             LoadSettings();
+            LoadMouseConfiguration();
+
+            if (MigrateLegacyMouseBindings())
+            {
+                // A previous build stored Mouse* bindings inside ApplicationConfig.
+                // Move them to the global list once so they survive future loads,
+                // then persist both files so the legacy entries don't get re-read.
+                Save();
+                SaveMouseConfiguration();
+            }
+        }
+
+        private void LoadMouseConfiguration()
+        {
+            try
+            {
+                if (!File.Exists(MouseConfigurationFilePath))
+                {
+                    log.Debug($"Mouse configuration file not found: {MouseConfigurationFilePath}");
+                    return;
+                }
+
+                using (var fileStream = new FileStream(MouseConfigurationFilePath, FileMode.Open, FileAccess.Read))
+                {
+                    if (MouseSerializer.Deserialize(fileStream) is MouseConfigurationFile mouseFile)
+                    {
+                        MouseBindings = mouseFile.Bindings ?? new List<InputBinding>();
+                        MouseSensitivity = mouseFile.Sensitivity > 0 ? mouseFile.Sensitivity : 5;
+                        log.Debug($"Loaded {MouseBindings.Count} mouse bindings, sensitivity {MouseSensitivity}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                log.Error(ex, "Error loading mouse configuration");
+                MouseBindings = new List<InputBinding>();
+                MouseSensitivity = 5;
+            }
+        }
+
+        public void SaveMouseConfiguration()
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(MouseConfigurationFilePath);
+
+                if (!Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                if (File.Exists(MouseConfigurationFilePath))
+                {
+                    File.Copy(MouseConfigurationFilePath, MouseConfigurationFilePath + ".bak", true);
+                }
+
+                var payload = new MouseConfigurationFile
+                {
+                    Sensitivity = MouseSensitivity,
+                    Bindings = MouseBindings ?? new List<InputBinding>(),
+                };
+
+                using (var fileStream = new FileStream(MouseConfigurationFilePath, FileMode.Create, FileAccess.Write))
+                {
+                    MouseSerializer.Serialize(fileStream, payload);
+                }
+
+                log.Debug($"Saved {payload.Bindings.Count} mouse bindings, sensitivity {payload.Sensitivity}");
+            }
+            catch (Exception ex)
+            {
+                log.Error(ex, "Error saving mouse configuration");
+            }
+        }
+
+        /// <summary>
+        /// One-time migration: prior builds stored Mouse* bindings inside each
+        /// ApplicationConfig. Move them out into the global MouseBindings list
+        /// and clear the per-app copies. Returns true if anything was moved so
+        /// the caller knows to persist.
+        /// </summary>
+        private bool MigrateLegacyMouseBindings()
+        {
+            bool migrated = false;
+
+            foreach (var config in ApplicationConfigs)
+            {
+                var legacy = config.InputBindings
+                    .Where(b => ApplicationConfig.IsMouseAction(b.Action))
+                    .ToList();
+
+                if (legacy.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (var binding in legacy)
+                {
+                    config.InputBindings.Remove(binding);
+                    MouseBindings.Add(binding);
+                }
+
+                migrated = true;
+                log.Debug($"Migrated {legacy.Count} mouse binding(s) from app '{config.DisplayName}' to global list");
+            }
+
+            return migrated;
         }
 
         private void LoadSettings()
