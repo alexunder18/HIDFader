@@ -1,83 +1,79 @@
-# HID Fader
+# HIDMate
 
-A Windows volume mixer that maps **HID controllers** to **per-application volume control**. 
-Turn any knob, slider, hat or button on your gaming device into a volume fader for your favorite game or application.
-That way you can control volume of your game, voice chat app, music player...
+Control volume, keyboard, and mouse using your **HID devices**.
+
+Turn any knob, slider, hat, or button on your controller into a way to control your apps — whether it's audio, keyboard input, or even mouse movement.
 
 ![Downloads](https://img.shields.io/github/downloads/alexunder18/HIDFader/total)
 ![License](https://img.shields.io/github/license/alexunder18/HIDFader?branch=develop&cacheSeconds=0)
 
+---
+
 ## ✨ Features
 
-- **Per-application volume control** — bind inputs to a specific process (e.g. `DCS.exe`, `discord.exe`, `spotify.exe`) via the Windows audio session API.
-- **HID / DirectInput support** — buttons, POV hats, and analog axes from any DirectInput game controller.
-- **Three actions** — Volume Up, Volume Down, Mute toggle.
-- **Analog axis mode** — map a throttle or slider directly to a volume level (with optional axis inversion for hardware that reports the wrong direction).
-- **Modifier keys** — Acts as a Shift button, so you can use same buttons for controlling different application volume levels. You can also have multiple modifiers binded at once.
-- **Device-stable bindings** — HID devices are identified by a VID/PID-derived GUID, so bindings survive USB port changes and reboots.
-- **Configurable volume change sensitivity** (1–10% per tick).
-- **Single-file executable** — packaged with Fody/Costura, no install required.
+- **Per-application volume control** — bind inputs to a specific process (e.g. `DCS.exe`, `discord.exe`, `spotify.exe`)
+- **Keyboard bindings** — map HID inputs to keyboard keys for the selected application (app must be in focus)
+- **Mouse bindings (global)** — control mouse movement, clicks, and scrolling
+- **HID / DirectInput support** — buttons, POV hats, and analog axes from any compatible controller
+- **Analog axis support** — map throttles or sliders directly to values (e.g. volume or movement)
+- **Modifier buttons** — reuse the same controls for different actions depending on which modifiers are pressed
+- **Configurable sensitivity** — fine-tune how inputs behave
+- **Single-file executable** — no installation required
+
+---
 
 ## 📋 Requirements
 
-- Windows 10 / 11
-- .NET Framework 4.8
-- Any DirectInput-compatible HID controller.
-- Tested with Thrustmaster Warthog Throttle and HOTAS, Saitek Cyborg, and some random USB Game Pad
+- Windows 10 / 11  
+- .NET Framework 4.8  
+- Any DirectInput-compatible HID controller  
+- Tested with Thrustmaster Warthog Throttle and HOTAS, Saitek Cyborg, and generic USB gamepads  
 
-## 🔨 Build
-
-Open `HIDFader.sln` in Visual Studio 2019+ and build the `Release` configuration, or from the command line:
-
-```
-msbuild HIDFader.sln /p:Configuration=Release
-```
-
-NuGet packages (CSCore, SharpDX.DirectInput, NLog, Fody, Costura.Fody) are restored automatically.
-
-The output is a single `HIDFader.exe` in `bin\Release\`.
+---
 
 ## 🚀 Usage
 
-1. Launch `HIDFader.exe`.
-2. All applications that are visible in the `Windows Volume Mixer` will be visible in the list.
-   (If you open your app after the HIDFader, click refresh to update the list)
-4. Open the binding editor for the application and bind inputs to **Volume Up**, **Volume Down**, or **Mute**.
-5. Adjust the global volume step (1–10%) as needed.
-6. Leave it running in the background, or minimize the app to tray.
+1. Launch `HIDMate.exe`
+2. Applications visible in the **Windows Volume Mixer** will appear in the list  
+   (If you open an app later, click refresh)
+3. Open the binding editor for an application  
+4. Bind inputs for:
+   - Volume control
+   - Keyboard actions
+5. Configure mouse bindings (global)
+6. Minimize to tray and use it in the background  
 
-### Application selector
-Double click the application from the list, click `Configure` or use keyboard and hit enter to open Binding editor
-<img width="586" height="493" alt="image" src="/hidfader-appselector.png" />
+---
+
+### Main screen
+
+Double-click an application, click `Configure`, or press Enter to open the binding editor.
+
+<img alt="image" src="/mainscreen.png" />
+
+---
 
 ### Binding editor
-Click on the input or modifier to start listening for a bind. Click checkmark icon to confirm or X to clear  
-Use  `Apply & Save` to save the changes or `Reset All` to clear all bindings
-<img width="632" height="577" alt="image" src="/hidfader-bindingeditor.png" />
+
+On this page, you can configure Volume and Keyboard bindings. Note that keyboard bindins will fire only if application is in focus, otherwise will be ignored.
+
+Click on an input or modifier to start listening for a bind.  
+Use the checkmark to confirm or X to clear.  
+Click `Apply & Save` to save changes or `Reset All` to clear everything.
+
+<img alt="image" src="/volumebindings.png" />
+<img alt="image" src="/keyboardbindings.png" />
+
+---
+
+### Mouse binging
+
+You can use any button or axis for controlling your mouse pointer (directions, left/right buttons, scroll up/down)
+<img alt="image" src="/mousebindings.png" />
+
+## 📁 Configuration
 
 Configuration and logs are stored in:
+```%appdata%\HIDMate```
 
-```
-%APPDATA%\HIDFader\
-```
-## 🧰 Tech stack
-
-| Component | Library |
-|---|---|
-| Audio sessions | [CSCore](https://github.com/filoe/cscore) |
-| HID / DirectInput | [SharpDX.DirectInput](https://github.com/sharpdx/SharpDX) |
-| Logging | [NLog](https://nlog-project.org/) |
-| Single-file packaging | [Fody](https://github.com/Fody/Fody) + [Costura.Fody](https://github.com/Fody/Costura) |
-| UI | WinForms |
-
-## 📁 Project layout
-
-```
-Core/    Configuration, bindings, audio session management
-Input/   DirectInput device enumeration, listener, hold-to-repeat state
-UI/      WinForms application selector and binding editor
-```
-
-## 📄 License
-
-[MIT](LICENSE)
+If you have existing configuration from previous version, located in ```%appdata%\HIDFader```, just move it to the new location
