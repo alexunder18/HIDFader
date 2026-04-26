@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 
-namespace HIDFader.Core
+namespace HIDMate.Core
 {
     /// <summary>
     /// Manages audio sessions and volume control for applications across all audio devices

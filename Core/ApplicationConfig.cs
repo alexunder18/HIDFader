@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Xml.Serialization;
 
-namespace HIDFader.Core
+namespace HIDMate.Core
 {
     /// <summary>
     /// Represents a complete configuration for a single application
@@ -109,6 +109,18 @@ namespace HIDFader.Core
                 }
             }
             return bindings;
+        }
+
+        /// <summary>
+        /// True for any Action starting with "Mouse". Mouse bindings are stored
+        /// globally on BindingConfiguration, not per ApplicationConfig — this
+        /// helper is kept here for the legacy-migration code path and for the
+        /// listener's binding-routing checks.
+        /// </summary>
+        public static bool IsMouseAction(string action)
+        {
+            return !string.IsNullOrEmpty(action)
+                && action.StartsWith("Mouse", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>

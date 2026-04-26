@@ -2,7 +2,7 @@ using CSCore.CoreAudioAPI;
 using System;
 using System.Diagnostics;
 
-namespace HIDFader.Core
+namespace HIDMate.Core
 {
     /// <summary>
     /// Represents information about an active audio session

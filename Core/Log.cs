@@ -4,7 +4,7 @@ using NLog;
 using NLog.Config;
 using NLog.Targets;
 
-namespace HIDFader.Core
+namespace HIDMate.Core
 {
     public static class Log
     {
@@ -16,13 +16,13 @@ namespace HIDFader.Core
                 return;
 
             var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var appConfigDir = Path.Combine(appDataPath, "HIDFader");
+            var appConfigDir = Path.Combine(appDataPath, "HIDMate");
 
             if (!Directory.Exists(appConfigDir))
                 Directory.CreateDirectory(appConfigDir);
 
-            var logFilePath = Path.Combine(appConfigDir, "HID Fader.log");
-            var archivePattern = Path.Combine(appConfigDir, "HID_Fader.{#}.log");
+            var logFilePath = Path.Combine(appConfigDir, "HIDMate.log");
+            var archivePattern = Path.Combine(appConfigDir, "HIDMate.{#}.log");
             var config = new LoggingConfiguration();
 
             var fileTarget = new FileTarget("file")
@@ -42,7 +42,7 @@ namespace HIDFader.Core
             config.AddRule(LogLevel.Debug, LogLevel.Fatal, fileTarget);
 
             LogManager.Configuration = config;
-            logger = LogManager.GetLogger("HIDFader");
+            logger = LogManager.GetLogger("HIDMate");
 
             logger.Info("=== Logging initialized. Log file: {0} ===", logFilePath);
         }

@@ -1,13 +1,14 @@
+using Microsoft.Win32;
 using NLog;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Windows.Forms;
-using HIDFader.Core;
-using HIDFader.Input;
+using HIDMate.Core;
+using HIDMate.Input;
 
-namespace HIDFader.UI
+namespace HIDMate.UI
 {
     /// <summary>
     /// Main application form - displays list of applications with volume control bindings
@@ -17,6 +18,11 @@ namespace HIDFader.UI
     {
         private readonly Logger log = LogManager.GetCurrentClassLogger();
 
+        // HKCU run-key entry name for the Start-with-Windows feature. Lives under
+        // HKEY_CURRENT_USER so we can write it without elevation.
+        private const string AutoStartRegistryKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        private const string AutoStartValueName = "HIDMate";
+
         private AudioSessionManager audioSessionManager;
         private BindingConfiguration bindingConfiguration;
         private VolumeControlListener volumeControlListener;
@@ -24,22 +30,36 @@ namespace HIDFader.UI
         private NotifyIcon trayIcon;
         private bool exitFromTray;
 
+        // Created at runtime rather than in InitializeComponent — the WinForms
+        // designer can't reliably round-trip a custom UserControl declared in
+        // the auto-generated code, so we keep the Designer file standard-only.
+        private MouseBindingsControl mouseBindingsControl;
+
         public frmApplicationSelector()
         {
             InitializeComponent();
 
-            this.Text = "HID Fader - Application Selection";
-            this.Size = new Size(600, 500);
+            this.Text = "HIDMate";
             this.StartPosition = FormStartPosition.CenterScreen;
-            
+
             listViewApplications.Columns.Add("Name", 200);
             listViewApplications.Columns.Add("Audio Device", 250);
             listViewApplications.Columns.Add("Bindings", 120);
 
             volumeStep.Minimum = 1;
             volumeStep.Maximum = 10;
-            volumeStep.Value = 5;            
+            volumeStep.Value = 5;
             volumeStep.ValueChanged += VolumeStep_SelectedItemChanged;
+
+            chkStartWithWindows.Checked = IsStartWithWindowsEnabled();
+            chkStartWithWindows.CheckedChanged += ChkStartWithWindows_CheckedChanged;
+
+            mouseBindingsControl = new MouseBindingsControl
+            {
+                Dock = DockStyle.Fill,
+                Name = "mouseBindingsControl",
+            };
+            tabMouse.Controls.Add(mouseBindingsControl);
 
             listViewApplications.DoubleClick += ListViewApplications_DoubleClick;
             listViewApplications.KeyDown += ListViewApplications_KeyDown;
@@ -60,7 +80,7 @@ namespace HIDFader.UI
             trayIcon = new NotifyIcon
             {
                 Icon = this.Icon ?? SystemIcons.Application,
-                Text = "HID Fader",
+                Text = "HIDMate",
                 ContextMenuStrip = menu,
                 Visible = false,
             };
@@ -112,6 +132,9 @@ namespace HIDFader.UI
 
                 int savedStep = bindingConfiguration.VolumeStepPercent;
                 volumeStep.Value = savedStep;
+
+                // Mouse tab needs the loaded configuration to render bindings.
+                mouseBindingsControl.Initialize(bindingConfiguration);
 
                 try
                 {
@@ -443,6 +466,56 @@ namespace HIDFader.UI
         private void BtnRefresh_Click(object sender, EventArgs e)
         {
             RefreshApplicationList();
+        }
+
+        // ---- Start with Windows ----
+
+        private static bool IsStartWithWindowsEnabled()
+        {
+            try
+            {
+                using (var key = Registry.CurrentUser.OpenSubKey(AutoStartRegistryKey, writable: false))
+                {
+                    return key?.GetValue(AutoStartValueName) != null;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void ChkStartWithWindows_CheckedChanged(object sender, EventArgs e)
+        {
+            try
+            {
+                using (var key = Registry.CurrentUser.OpenSubKey(AutoStartRegistryKey, writable: true))
+                {
+                    if (key == null)
+                    {
+                        log.Error("Could not open HKCU Run key");
+                        return;
+                    }
+
+                    if (chkStartWithWindows.Checked)
+                    {
+                        // Quote the path so spaces in folder names don't break Run-key parsing.
+                        key.SetValue(AutoStartValueName, $"\"{Application.ExecutablePath}\"");
+                        log.Debug($"Registered autostart: {Application.ExecutablePath}");
+                    }
+                    else
+                    {
+                        key.DeleteValue(AutoStartValueName, throwOnMissingValue: false);
+                        log.Debug("Removed autostart entry");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                log.Error(ex, "Failed to update Start with Windows setting");
+                MessageBox.Show($"Could not update Start with Windows setting: {ex.Message}",
+                    "Setting Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)

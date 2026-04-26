@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Xml.Serialization;
 
-namespace HIDFader.Core
+namespace HIDMate.Core
 {
     /// <summary>
     /// Represents a single input binding (HID button, keyboard key, or combination)

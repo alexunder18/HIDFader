@@ -1,4 +1,4 @@
-namespace HIDFader.UI
+namespace HIDMate.UI
 {
     partial class frmBindingEditor
     {
@@ -59,11 +59,11 @@ namespace HIDFader.UI
             this.tabHID.Padding = new System.Windows.Forms.Padding(5);
             this.tabHID.Size = new System.Drawing.Size(612, 469);
             this.tabHID.TabIndex = 0;
-            this.tabHID.Text = "HID Configuration";
+            this.tabHID.Text = "Volume";
             this.tabHID.UseVisualStyleBackColor = true;
-            //
+            // 
             // tabKeyboard
-            //
+            // 
             this.tabKeyboard.AutoScroll = true;
             this.tabKeyboard.Location = new System.Drawing.Point(4, 22);
             this.tabKeyboard.Name = "tabKeyboard";
@@ -72,9 +72,9 @@ namespace HIDFader.UI
             this.tabKeyboard.TabIndex = 1;
             this.tabKeyboard.Text = "Keyboard";
             this.tabKeyboard.UseVisualStyleBackColor = true;
-            //
+            // 
             // panelButtons
-            //
+            // 
             this.panelButtons.BackColor = System.Drawing.SystemColors.Control;
             this.panelButtons.Controls.Add(this.btnApply);
             this.panelButtons.Controls.Add(this.btnReset);

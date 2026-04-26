@@ -2,7 +2,7 @@ using SharpDX.DirectInput;
 using System;
 using System.Collections.Generic;
 
-namespace HIDFader.Input
+namespace HIDMate.Input
 {
     /// <summary>
     /// Represents a joystick device

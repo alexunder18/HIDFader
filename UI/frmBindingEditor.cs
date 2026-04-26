@@ -6,10 +6,10 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
-using HIDFader.Core;
-using HIDFader.Input;
+using HIDMate.Core;
+using HIDMate.Input;
 
-namespace HIDFader.UI
+namespace HIDMate.UI
 {
     public partial class frmBindingEditor : Form
     {

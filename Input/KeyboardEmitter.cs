@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace HIDFader.Input
+namespace HIDMate.Input
 {
     /// <summary>
     /// Emits keyboard chords via Win32 SendInput. A "chord" is a token like
