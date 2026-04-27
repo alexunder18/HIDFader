@@ -4,8 +4,8 @@ Control volume, keyboard, and mouse using your **HID devices**.
 
 Turn any knob, slider, hat, or button on your controller into a way to control your apps — whether it's audio, keyboard input, or even mouse movement.
 
-![Downloads](https://img.shields.io/github/downloads/alexunder18/HIDFader/total)
-![License](https://img.shields.io/github/license/alexunder18/HIDFader?branch=develop&cacheSeconds=0)
+![Downloads](https://img.shields.io/github/downloads/alexunder18/HIDMate/total)
+![License](https://img.shields.io/github/license/alexunder18/HIDMate?branch=develop&cacheSeconds=0)
 
 ---
 
@@ -55,7 +55,7 @@ Double-click an application, click `Configure`, or press Enter to open the bindi
 
 ### Binding editor
 
-On this page, you can configure Volume and Keyboard bindings. Note that keyboard bindins will fire only if application is in focus, otherwise will be ignored.
+On this page, you can configure Volume and Keyboard bindings. Note that keyboard bindings will fire only if application is in focus, otherwise will be ignored.
 
 Click on an input or modifier to start listening for a bind.  
 Use the checkmark to confirm or X to clear.  
